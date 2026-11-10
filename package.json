@@ -1,0 +1,56 @@
+{
+  "name": "pi-chess",
+  "version": "0.1.0",
+  "description": "Lichess correspondence chess for pi: a board above the input box while the agent works.",
+  "author": "Denis Mrvoljak",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "test": "node --test",
+    "check": "npm run typecheck && npm test"
+  },
+  "files": [
+    "README.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "extensions",
+    "src"
+  ],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "chess",
+    "lichess",
+    "typescript"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "dependencies": {
+    "chess.js": "1.4.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.2",
+    "@earendil-works/pi-tui": "1.5.2",
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/denismrvoljak/pi-chess.git"
+  },
+  "homepage": "https://github.com/denismrvoljak/pi-chess",
+  "bugs": {
+    "url": "https://github.com/denismrvoljak/pi-chess/issues"
+  },
+  "license": "MIT"
+}
