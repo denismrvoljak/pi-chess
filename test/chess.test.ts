@@ -97,7 +97,7 @@ test("logs in with PKCE and saves the token privately", async () => {
     open: (url) => {
       const query = new URL(url).searchParams;
       challenge = query.get("code_challenge") ?? "";
-      assert.equal(query.get("scope"), "board:play challenge:read challenge:write");
+      assert.equal(query.get("scope"), "board:play challenge:read challenge:write follow:read");
       const back = query.get("redirect_uri");
       void fetch(`${back}?code=wrong&state=forged`).then(() =>
         fetch(`${back}?code=abc&state=${query.get("state")}`),
@@ -114,4 +114,42 @@ test("logs in with PKCE and saves the token privately", async () => {
   assert.equal(token, "tok");
   assert.equal(await savedToken(file), "tok");
   assert.equal((await stat(file)).mode & 0o777, 0o600);
+});
+
+test("solves the daily puzzle move by move and rejects a wrong move", async () => {
+  const { attempt, parsePuzzle } = await import("../src/puzzle.ts");
+  const puzzle = parsePuzzle({
+    puzzle: {
+      id: "BngAa",
+      rating: 1898,
+      fen: "8/6pp/4P3/1k6/8/p3K3/4RPPP/4r3 b - - 1 1",
+      lastMove: "d2e2",
+      solution: ["e1e2", "e3e2", "b5c6"],
+    },
+  });
+  const board = position("", puzzle.fen);
+  assert.equal(attempt(board, puzzle.solution, 0, "b5c6"), undefined);
+  assert.equal(board.fen(), puzzle.fen);
+  // The right move is played together with the opponent's reply.
+  assert.deepEqual(attempt(board, puzzle.solution, 0, "e1e2"), { step: 2, last: "e3e2", solved: false });
+  assert.equal(board.get("e2")?.type, "k");
+  assert.deepEqual(attempt(board, puzzle.solution, 2, "b5c6"), { step: 3, last: "b5c6", solved: true });
+});
+
+test("accepts any checkmate in a puzzle and refuses an unreadable puzzle", async () => {
+  const { attempt, parsePuzzle } = await import("../src/puzzle.ts");
+  const board = position("", "6k1/8/6K1/8/8/8/8/RR6 w - - 0 1");
+  assert.deepEqual(attempt(board, ["a1a8"], 0, "b1b8"), { step: 1, last: "b1b8", solved: true });
+  assert.throws(() => parsePuzzle({ puzzle: { fen: "x", solution: [] } }), /cannot be read/);
+  assert.throws(() => parsePuzzle({ puzzle: { fen: "x", solution: ["e2e4; rm"] } }), /cannot be read/);
+  assert.throws(() => parsePuzzle({}), /cannot be read/);
+});
+
+test("lists the usernames this account follows", async () => {
+  const fake = (async (url: string) => {
+    assert.equal(url, "https://lichess.org/api/rel/following");
+    return new Response('{"id":"ana","username":"Ana"}\n{"id":"x"}\n{"username":"karl_k"}\n');
+  }) as typeof fetch;
+  const api = lichess("secret", new AbortController().signal, fake);
+  assert.deepEqual(await api.following(), ["Ana", "karl_k"]);
 });

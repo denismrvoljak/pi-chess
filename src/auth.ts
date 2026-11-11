@@ -53,7 +53,7 @@ export async function login(
           redirect_uri: redirect,
           code_challenge_method: "S256",
           code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-          scope: "board:play challenge:read challenge:write",
+          scope: "board:play challenge:read challenge:write follow:read",
           state,
         })}`,
       );

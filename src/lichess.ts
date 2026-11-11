@@ -37,6 +37,16 @@ export function lichess(token: string, signal: AbortSignal, fetchFn: typeof fetc
     > =>
       (await (await call("/api/account/playing")).json()).nowPlaying,
     game: (id: string) => stream(`/api/board/game/stream/${id}`),
+    /** Usernames of the players this account follows. Needs the follow:read scope. */
+    following: async () => {
+      const names: string[] = [];
+      for await (const user of await stream("/api/rel/following")) {
+        if (typeof user?.username === "string") names.push(user.username);
+        // shortcut: the picker shows at most 200 friends, add a search if that is too few.
+        if (names.length >= 200) break;
+      }
+      return names;
+    },
     seek: async () => {
       // A correspondence seek stays in the Lichess lobby after this response ends.
       await (await call("/api/board/seek", terms)).body?.cancel();

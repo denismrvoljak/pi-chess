@@ -4,6 +4,7 @@ import type { Square } from "chess.js";
 import { forgetToken, login, savedToken } from "../../src/auth.ts";
 import { position, render, squareAt, targets, uci } from "../../src/game.ts";
 import { clean, lichess, type Lichess } from "../../src/lichess.ts";
+import { attempt, dailyPuzzle } from "../../src/puzzle.ts";
 
 const clock = (ms: number) => {
   const seconds = Math.max(0, Math.round(ms / 1000));
@@ -14,7 +15,8 @@ const clock = (ms: number) => {
 };
 
 // Lichess board for Pi. /chess resumes a game or starts one, /chess new starts
-// one, /chess <user> challenges, /chess accept takes a challenge.
+// one, /chess <user> challenges, /chess accept takes a challenge, /chess puzzle
+// opens the Lichess daily puzzle.
 export default function chess(pi: ExtensionAPI) {
   let stop: (() => void) | undefined;
   // The board size holds for the session. Press b on the board to switch.
@@ -22,6 +24,88 @@ export default function chess(pi: ExtensionAPI) {
   // A finished game keeps its board until Escape, but it does not block the next /chess.
   let over = false;
   pi.on("session_shutdown", () => stop?.());
+
+  const USERNAME = /^[a-z0-9_-]{2,30}$/i;
+  const mount = (ctx: ExtensionCommandContext, draw: (rows: number) => string[], onKey: (data: string) => void) => {
+    let redraw = () => {};
+    let removeInput = () => {};
+    ctx.ui.setWidget("chess", (tui) => {
+      redraw = () => tui.requestRender();
+      removeInput = tui.addInputListener((data) => {
+        if (!isKeyRelease(data)) {
+          onKey(data);
+          redraw();
+        }
+        return { consume: true };
+      });
+      return { render: () => draw(tui.terminal.rows), invalidate: () => {} };
+    });
+    return {
+      redraw: () => redraw(),
+      unmount: () => {
+        removeInput();
+        ctx.ui.setWidget("chess", undefined);
+      },
+    };
+  };
+  const arrows = (data: string, at: { col: number; row: number }) => {
+    if (matchesKey(data, "left")) at.col = Math.max(0, at.col - 1);
+    if (matchesKey(data, "right")) at.col = Math.min(7, at.col + 1);
+    if (matchesKey(data, "up")) at.row = Math.max(0, at.row - 1);
+    if (matchesKey(data, "down")) at.row = Math.min(7, at.row + 1);
+  };
+  const closed = (abort: AbortController) =>
+    abort.signal.aborted
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
+  // The large board needs 25 rows plus the text rows, the editor and the footer.
+  const big = (rows: number) => !compact && rows >= 34;
+
+  const solve = async (ctx: ExtensionCommandContext, abort: AbortController) => {
+    const puzzle = await dailyPuzzle(abort.signal);
+    const board = position("", puzzle.fen);
+    const white = board.turn() === "w";
+    const at = { col: 4, row: 6 };
+    let selected: Square | undefined;
+    let step = 0;
+    let last = puzzle.lastMove;
+    let solved = false;
+    let message = "";
+    const view = mount(
+      ctx,
+      (rows) => [
+        ` Lichess daily puzzle · rating ${puzzle.rating} · ${white ? "White" : "Black"} to move`,
+        ...render(board, { white, ...at, selected, last, big: big(rows) }),
+        ` ${message || (solved ? "Solved. Esc closes." : "Find the best move")}`,
+        " arrows move · Enter select/move · b board size · Esc close",
+      ],
+      (data) => {
+        message = "";
+        if (data === "b") compact = !compact;
+        if (matchesKey(data, "escape")) return abort.abort();
+        arrows(data, at);
+        if (matchesKey(data, "enter") || matchesKey(data, "space")) {
+          const square = squareAt(at.col, at.row, white);
+          const move = selected && !solved ? uci(board, selected, square) : undefined;
+          if (move) {
+            selected = undefined;
+            const right = attempt(board, puzzle.solution, step, move);
+            if (right) ({ step, last, solved } = right);
+            else message = "Not the best move. Try again.";
+            over = solved;
+          } else {
+            const own = board.get(square)?.color === (white ? "w" : "b");
+            selected = own && square !== selected ? square : undefined;
+          }
+        }
+      },
+    );
+    try {
+      await closed(abort);
+    } finally {
+      view.unmount();
+    }
+  };
 
   const play = async (
     api: Lichess,
@@ -35,14 +119,10 @@ export default function chess(pi: ExtensionAPI) {
     let received = Date.now();
     let names = { white: "White", black: "Black" };
     let initialFen = "startpos";
-    let col = 4;
-    let row = 6;
+    const at = { col: 4, row: 6 };
     let selected: Square | undefined;
     let message = "";
     let confirmResign = false;
-    let redraw = () => {};
-    let rows = () => 0;
-    let removeInput = () => {};
 
     // The board also decides the end itself, in case the final Lichess status is late or lost.
     const live = () => (state.status === "started" || state.status === "created") && !board.isGameOver();
@@ -53,7 +133,7 @@ export default function chess(pi: ExtensionAPI) {
           ? "Draw."
           : `Game over: ${clean(state.status)}${state.winner ? `, ${clean(state.winner)} wins` : ""}.`;
     const myTurn = () => live() && (board.turn() === "w") === white;
-    const lines = () => {
+    const lines = (rows: number) => {
       const moved = state.moves ? state.moves.split(" ") : [];
       // Lichess starts the clocks after each side has moved once.
       const elapsed = live() && moved.length >= 2 ? Date.now() - received : 0;
@@ -66,8 +146,7 @@ export default function chess(pi: ExtensionAPI) {
         : `${result()} Esc closes.`;
       return [
         ` ${names.white} ${time("w")}  vs  ${names.black} ${time("b")}`,
-        // The large board needs 25 rows plus the text rows, the editor and the footer.
-        ...render(board, { white, col, row, selected, last: moved.at(-1), big: !compact && rows() >= 34 }),
+        ...render(board, { white, ...at, selected, last: moved.at(-1), big: big(rows) }),
         ` ${message || status}`,
         " arrows move · Enter select/move · b board size · R resign · Esc close",
       ];
@@ -75,7 +154,7 @@ export default function chess(pi: ExtensionAPI) {
     const fail = (error: unknown) => {
       if (!abort.signal.aborted) {
         message = clean(error instanceof Error ? error.message : String(error));
-        redraw();
+        view.redraw();
       }
     };
     const onKey = (data: string) => {
@@ -83,12 +162,9 @@ export default function chess(pi: ExtensionAPI) {
       if (data === "b") compact = !compact;
       message = "";
       if (matchesKey(data, "escape")) return abort.abort();
-      if (matchesKey(data, "left")) col = Math.max(0, col - 1);
-      if (matchesKey(data, "right")) col = Math.min(7, col + 1);
-      if (matchesKey(data, "up")) row = Math.max(0, row - 1);
-      if (matchesKey(data, "down")) row = Math.min(7, row + 1);
+      arrows(data, at);
       if (matchesKey(data, "enter") || matchesKey(data, "space")) {
-        const square = squareAt(col, row, white);
+        const square = squareAt(at.col, at.row, white);
         const move = selected && myTurn() ? uci(board, selected, square) : undefined;
         if (move) {
           api.move(game.gameId, move).catch(fail);
@@ -103,19 +179,10 @@ export default function chess(pi: ExtensionAPI) {
         else message = "Press R again to resign";
       }
       confirmResign = resign && !confirmResign;
-      redraw();
     };
 
-    ctx.ui.setWidget("chess", (tui) => {
-      redraw = () => tui.requestRender();
-      rows = () => tui.terminal.rows;
-      removeInput = tui.addInputListener((data) => {
-        if (!isKeyRelease(data)) onKey(data);
-        return { consume: true };
-      });
-      return { render: lines, invalidate: () => {} };
-    });
-    const ticking = setInterval(() => redraw(), 1000);
+    const view = mount(ctx, lines, onKey);
+    const ticking = setInterval(() => view.redraw(), 1000);
     try {
       for await (const event of await api.game(game.gameId)) {
         if (event.type === "gameFull") {
@@ -132,29 +199,37 @@ export default function chess(pi: ExtensionAPI) {
           received = Date.now();
           selected = undefined;
           over = !live();
-          redraw();
+          view.redraw();
         }
       }
       // The stream ends with the game. Keep the final board until Escape.
-      if (!abort.signal.aborted) {
-        await new Promise((resolve) => abort.signal.addEventListener("abort", resolve, { once: true }));
-      }
+      await closed(abort);
     } finally {
       clearInterval(ticking);
-      removeInput();
-      ctx.ui.setWidget("chess", undefined);
+      view.unmount();
     }
   };
 
   /** A Lichess username, "" for a public seek, or undefined when the picker is cancelled. */
-  const pick = async (ctx: ExtensionCommandContext) => {
+  const pick = async (api: Lichess, ctx: ExtensionCommandContext) => {
     const seek = "Any opponent (public seek)";
-    const choice = await ctx.ui.select("Start a 3-day game", [seek, "Challenge a Lichess user"]);
+    const other = "Another Lichess user";
+    let friends: string[] = [];
+    let title = "Start a 3-day game";
+    try {
+      friends = (await api.following()).filter((name) => USERNAME.test(name));
+    } catch (error) {
+      // A token from before the friends list has no follow:read scope.
+      if (!(error instanceof Error) || !/^Lichess 40[13]/.test(error.message)) throw error;
+      title += " · /chess logout, then /chess, to list your friends";
+    }
+    const choice = await ctx.ui.select(title, [seek, ...friends, other]);
     if (!choice) return undefined;
     if (choice === seek) return "";
+    if (choice !== other) return choice;
     const user = (await ctx.ui.input("Lichess username"))?.trim();
     if (!user) return undefined;
-    if (/^[a-z0-9_-]{2,30}$/i.test(user)) return user;
+    if (USERNAME.test(user)) return user;
     ctx.ui.notify("That is not a valid Lichess username.", "warning");
     return undefined;
   };
@@ -165,6 +240,7 @@ export default function chess(pi: ExtensionAPI) {
     stop = mine;
     over = false;
     try {
+      if (arg === "puzzle") return await solve(ctx, abort);
       let token = process.env.LICHESS_TOKEN ?? (await savedToken());
       if (!token) {
         ctx.ui.setStatus("chess", "Lichess: approve access in your browser. /chess stop cancels.");
@@ -206,8 +282,9 @@ export default function chess(pi: ExtensionAPI) {
           (each, index) => `Accept challenge ${index + 1} from ${clean(each.challenger?.name ?? "unknown")}`,
         );
         const fresh = "New game";
+        const daily = "Daily puzzle";
         let choice: string | undefined = fresh;
-        if (arg !== "new" && games.length + requests.length > 0) {
+        if (arg !== "new") {
           const waiting = pending.out.map((each) => clean(each.destUser?.name ?? "unknown")).join(", ");
           choice =
             games.length === 1 && requests.length === 0
@@ -216,13 +293,15 @@ export default function chess(pi: ExtensionAPI) {
                   ...games,
                   ...requests,
                   fresh,
+                  daily,
                 ]);
         }
         if (!choice) return;
         if (games.includes(choice)) game = ongoing[games.indexOf(choice)];
         else if (requests.includes(choice)) game = await accept(pending.in[requests.indexOf(choice)]?.id ?? "");
+        else if (choice === daily) return await solve(ctx, abort);
         else {
-          const opponent = await pick(ctx);
+          const opponent = await pick(api, ctx);
           if (opponent !== undefined) await start(opponent);
         }
       }
@@ -244,7 +323,7 @@ export default function chess(pi: ExtensionAPI) {
   };
 
   pi.registerCommand("chess", {
-    description: "Play Lichess: /chess (games, incoming challenges, new game), /chess new, /chess <user>, /chess accept, /chess stop, /chess logout",
+    description: "Play Lichess: /chess (games, incoming challenges, new game), /chess new, /chess <user>, /chess accept, /chess puzzle, /chess stop, /chess logout",
     handler: async (args, ctx) => {
       const arg = args.trim();
       if (arg === "stop") stop?.();
