@@ -115,16 +115,3 @@ test("logs in with PKCE and saves the token privately", async () => {
   assert.equal(await savedToken(file), "tok");
   assert.equal((await stat(file)).mode & 0o777, 0o600);
 });
-
-test("reads roster entries with a valid Lichess username", async () => {
-  const { members, rosterCommand } = await import("../src/roster.ts");
-  assert.deepEqual(
-    members(JSON.stringify([{ name: "Karl\x1b[2J", lichess: "Karl_K" }, { name: "Bad", lichess: "../api/token" }, {}])),
-    [{ name: "Karl?[2J", lichess: "karl_k" }],
-  );
-  const stored = { records: [{ data: { name: "Ana", accounts: { lichess: "ana" } } }, { data: {} }] };
-  assert.deepEqual(members(JSON.stringify(stored)), [{ name: "Ana", lichess: "ana" }]);
-  assert.deepEqual(members("{}"), []);
-  assert.deepEqual(rosterCommand("  my-roster  --json "), ["my-roster", "--json"]);
-  assert.equal(rosterCommand(""), undefined);
-});

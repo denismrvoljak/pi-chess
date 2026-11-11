@@ -4,7 +4,6 @@ import type { Square } from "chess.js";
 import { forgetToken, login, savedToken } from "../../src/auth.ts";
 import { position, render, squareAt, targets, uci } from "../../src/game.ts";
 import { clean, lichess, type Lichess } from "../../src/lichess.ts";
-import { members, rosterCommand } from "../../src/roster.ts";
 
 const clock = (ms: number) => {
   const seconds = Math.max(0, Math.round(ms / 1000));
@@ -14,8 +13,8 @@ const clock = (ms: number) => {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 };
 
-// Lichess board for Pi. /chess resumes a game or starts one, /chess new picks a
-// roster opponent, /chess <user> challenges, /chess accept takes a challenge.
+// Lichess board for Pi. /chess resumes a game or starts one, /chess new starts
+// one, /chess <user> challenges, /chess accept takes a challenge.
 export default function chess(pi: ExtensionAPI) {
   let stop: (() => void) | undefined;
   // The board size holds for the session. Press b on the board to switch.
@@ -148,24 +147,16 @@ export default function chess(pi: ExtensionAPI) {
   };
 
   /** A Lichess username, "" for a public seek, or undefined when the picker is cancelled. */
-  const pick = async (api: Lichess, ctx: ExtensionCommandContext) => {
-    const seek = "Any opponent (Lichess seek)";
-    let club: ReturnType<typeof members> = [];
-    const [command, ...args] = rosterCommand() ?? [];
-    if (command) {
-      try {
-        const [listed, me] = await Promise.all([pi.exec(command, args), api.account()]);
-        if (listed.code !== 0) throw new Error(listed.stderr || `${command} failed`);
-        club = members(listed.stdout).filter((member) => member.lichess !== me);
-      } catch (error) {
-        const text = clean(error instanceof Error ? error.message : String(error));
-        ctx.ui.notify(`The opponent roster is unavailable: ${text}`, "warning");
-      }
-    }
-    const labels = club.map((member) => `${member.name} (${member.lichess})`);
-    const choice = await ctx.ui.select("Start a 3-day game against", [...labels, seek]);
+  const pick = async (ctx: ExtensionCommandContext) => {
+    const seek = "Any opponent (public seek)";
+    const choice = await ctx.ui.select("Start a 3-day game", [seek, "Challenge a Lichess user"]);
     if (!choice) return undefined;
-    return choice === seek ? "" : club[labels.indexOf(choice)]?.lichess;
+    if (choice === seek) return "";
+    const user = (await ctx.ui.input("Lichess username"))?.trim();
+    if (!user) return undefined;
+    if (/^[a-z0-9_-]{2,30}$/i.test(user)) return user;
+    ctx.ui.notify("That is not a valid Lichess username.", "warning");
+    return undefined;
   };
 
   const run = async (arg: string, ctx: ExtensionCommandContext) => {
@@ -231,7 +222,7 @@ export default function chess(pi: ExtensionAPI) {
         if (games.includes(choice)) game = ongoing[games.indexOf(choice)];
         else if (requests.includes(choice)) game = await accept(pending.in[requests.indexOf(choice)]?.id ?? "");
         else {
-          const opponent = await pick(api, ctx);
+          const opponent = await pick(ctx);
           if (opponent !== undefined) await start(opponent);
         }
       }

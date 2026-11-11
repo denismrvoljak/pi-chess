@@ -24,7 +24,7 @@ Every game lives on Lichess. The package saves no game state, makes no model cal
 
 - opens your ongoing Lichess games and shows whose move it is
 - lists incoming challenges, so you can accept them from pi
-- challenges a Lichess user, a person from your own roster, or anyone through a public seek
+- challenges a Lichess user, or anyone through a public seek
 - starts every game as casual correspondence with 3 days per move
 - draws the board in two sizes, the large one with block-art pieces
 - logs in through the Lichess consent page in the browser, with no app registration
@@ -54,7 +54,7 @@ pi list
 | Command | What it does |
 |---|---|
 | `/chess` | Opens the only ongoing game. With several games or incoming challenges, it shows a menu: open a game, accept a challenge, or start a new game. |
-| `/chess new` | Starts a game. Pick an opponent from your roster, or post a public Lichess seek. |
+| `/chess new` | Starts a game. Post a public Lichess seek, or type a Lichess username to challenge. |
 | `/chess <user>` | Challenges a Lichess user. |
 | `/chess accept` | Accepts the first incoming challenge and opens the game. |
 | `/chess stop` | Closes the board, or cancels a login that waits for the browser. |
@@ -87,23 +87,6 @@ On a machine without a browser, set `LICHESS_TOKEN` to a personal Lichess token 
 
 `/chess logout` deletes the local file only. Revoke the token at lichess.org/account/security.
 
-## Opponent roster
-
-`/chess new` can list people you play often, such as a chess club. Set `PI_CHESS_ROSTER` to a command that prints JSON:
-
-```json
-[
-  { "name": "Ana", "lichess": "ana_plays" },
-  { "name": "Karl", "lichess": "karl_k" }
-]
-```
-
-```bash
-export PI_CHESS_ROSTER="cat /absolute/path/to/roster.json"
-```
-
-The command runs each time the picker opens, so the list can come from a file or from a service. Entries without a valid Lichess username are skipped, and your own account is left out. Without `PI_CHESS_ROSTER`, the picker offers only the public seek.
-
 ## Local development workflow with `/reload`
 
 ```bash
@@ -121,7 +104,7 @@ npm test
 npm run check
 ```
 
-The tests cover move replay, legal moves, board drawing, the game stream reader, the API client, the login against a local stand-in, and roster parsing.
+The tests cover move replay, legal moves, board drawing, the game stream reader, the API client, and the login against a local stand-in.
 
 ## Known limitations
 

@@ -36,7 +36,6 @@ export function lichess(token: string, signal: AbortSignal, fetchFn: typeof fetc
       { gameId: string; color: "white" | "black"; isMyTurn?: boolean; opponent?: { username?: string } }[]
     > =>
       (await (await call("/api/account/playing")).json()).nowPlaying,
-    account: async (): Promise<string> => (await (await call("/api/account")).json()).id,
     game: (id: string) => stream(`/api/board/game/stream/${id}`),
     seek: async () => {
       // A correspondence seek stays in the Lichess lobby after this response ends.
