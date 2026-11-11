@@ -71,6 +71,7 @@ A challenge or a seek returns at once, because the opponent can take days to ans
 | Arrows | Move the cursor |
 | Enter or Space | Select a piece, then move it |
 | `b` | Switch the board size |
+| `g` | Open your next ongoing game. Shown when you have more than one. |
 | `R` twice | Resign |
 | Escape | Close the board. The game continues on Lichess. |
 

@@ -112,7 +112,11 @@ export default function chess(pi: ExtensionAPI) {
     game: { gameId: string; color: "white" | "black" },
     ctx: ExtensionCommandContext,
     abort: AbortController,
+    quit: () => void,
+    switchable: boolean,
   ) => {
+    // Resolves true when the player pressed g to open the next game.
+    let switching = false;
     const white = game.color === "white";
     let board = position("");
     let state = { moves: "", status: "created", wtime: 0, btime: 0, winner: undefined as string | undefined };
@@ -148,7 +152,7 @@ export default function chess(pi: ExtensionAPI) {
         ` ${names.white} ${time("w")}  vs  ${names.black} ${time("b")}`,
         ...render(board, { white, ...at, selected, last: moved.at(-1), big: big(rows) }),
         ` ${message || status}`,
-        " arrows move · Enter select/move · b board size · R resign · Esc close",
+        ` arrows move · Enter select/move · b board size${switchable ? " · g next game" : ""} · R resign · Esc close`,
       ];
     };
     const fail = (error: unknown) => {
@@ -161,7 +165,11 @@ export default function chess(pi: ExtensionAPI) {
       const resign = data === "R";
       if (data === "b") compact = !compact;
       message = "";
-      if (matchesKey(data, "escape")) return abort.abort();
+      if (matchesKey(data, "escape")) return quit();
+      if (data === "g" && switchable) {
+        switching = true;
+        return abort.abort();
+      }
       arrows(data, at);
       if (matchesKey(data, "enter") || matchesKey(data, "space")) {
         const square = squareAt(at.col, at.row, white);
@@ -204,10 +212,14 @@ export default function chess(pi: ExtensionAPI) {
       }
       // The stream ends with the game. Keep the final board until Escape.
       await closed(abort);
+    } catch (error) {
+      // Switching or closing cancels the game stream; that is not an error.
+      if (!abort.signal.aborted) throw error;
     } finally {
       clearInterval(ticking);
       view.unmount();
     }
+    return switching;
   };
 
   /** A Lichess username, "" for a public seek, or undefined when the picker is cancelled. */
@@ -305,7 +317,27 @@ export default function chess(pi: ExtensionAPI) {
           if (opponent !== undefined) await start(opponent);
         }
       }
-      if (game) await play(api, game, ctx, abort);
+      // g on the board opens the next ongoing game, in the order Lichess lists them.
+      while (game && !abort.signal.aborted) {
+        const all = await api.playing();
+        const board = new AbortController();
+        const follow = () => board.abort();
+        abort.signal.addEventListener("abort", follow, { once: true });
+        const current: typeof game = game;
+        const switched = await play(
+          lichess(token, board.signal),
+          current,
+          ctx,
+          board,
+          () => abort.abort(),
+          all.some((each) => each.gameId !== current.gameId),
+        );
+        abort.signal.removeEventListener("abort", follow);
+        if (!switched) break;
+        over = false;
+        const index = all.findIndex((each) => each.gameId === current.gameId);
+        game = all[(index + 1) % all.length];
+      }
     } catch (error) {
       if (!abort.signal.aborted) {
         const text = clean(error instanceof Error ? error.message : String(error));
