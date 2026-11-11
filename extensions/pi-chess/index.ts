@@ -61,7 +61,8 @@ export default function chess(pi: ExtensionAPI) {
   // The large board needs 18 rows plus the text rows, the editor and the footer.
   const big = (rows: number) => !compact && rows >= 28;
 
-  const solve = async (ctx: ExtensionCommandContext, abort: AbortController) => {
+  const solve = async (ctx: ExtensionCommandContext, abort: AbortController, quit: () => void) => {
+    let back = false;
     const puzzle = await dailyPuzzle(abort.signal);
     const board = position("", puzzle.fen);
     const white = board.turn() === "w";
@@ -77,12 +78,16 @@ export default function chess(pi: ExtensionAPI) {
         ` Lichess daily puzzle · rating ${puzzle.rating} · ${white ? "White" : "Black"} to move`,
         ...render(board, { white, ...at, selected, last, big: big(rows) }),
         ` ${message || (solved ? "Solved. Esc closes." : "Find the best move")}`,
-        " arrows move · Enter select/move · b board size · Esc close",
+        " arrows move · Enter select/move · b board size · g games · Esc close",
       ],
       (data) => {
         message = "";
         if (data === "b") compact = !compact;
-        if (matchesKey(data, "escape")) return abort.abort();
+        if (matchesKey(data, "escape")) return quit();
+        if (data === "g") {
+          back = true;
+          return abort.abort();
+        }
         arrows(data, at);
         if (matchesKey(data, "enter") || matchesKey(data, "space")) {
           const square = squareAt(at.col, at.row, white);
@@ -105,6 +110,7 @@ export default function chess(pi: ExtensionAPI) {
     } finally {
       view.unmount();
     }
+    return back;
   };
 
   const play = async (
@@ -113,9 +119,8 @@ export default function chess(pi: ExtensionAPI) {
     ctx: ExtensionCommandContext,
     abort: AbortController,
     quit: () => void,
-    switchable: boolean,
   ) => {
-    // Resolves true when the player pressed g to open the next game.
+    // Resolves true when the player pressed g to go back to the game menu.
     let switching = false;
     const white = game.color === "white";
     let board = position("");
@@ -152,7 +157,7 @@ export default function chess(pi: ExtensionAPI) {
         ` ${names.white} ${time("w")}  vs  ${names.black} ${time("b")}`,
         ...render(board, { white, ...at, selected, last: moved.at(-1), big: big(rows) }),
         ` ${message || status}`,
-        ` arrows move · Enter select/move · b board size${switchable ? " · g next game" : ""} · R resign · Esc close`,
+        " arrows move · Enter select/move · b board size · g games · R resign · Esc close",
       ];
     };
     const fail = (error: unknown) => {
@@ -166,7 +171,7 @@ export default function chess(pi: ExtensionAPI) {
       if (data === "b") compact = !compact;
       message = "";
       if (matchesKey(data, "escape")) return quit();
-      if (data === "g" && switchable) {
+      if (data === "g") {
         switching = true;
         return abort.abort();
       }
@@ -249,43 +254,51 @@ export default function chess(pi: ExtensionAPI) {
   const run = async (arg: string, ctx: ExtensionCommandContext) => {
     const abort = new AbortController();
     const mine = () => abort.abort();
+    const quit = () => abort.abort();
     stop = mine;
     over = false;
     try {
-      if (arg === "puzzle") return await solve(ctx, abort);
       let token = process.env.LICHESS_TOKEN ?? (await savedToken());
-      if (!token) {
-        ctx.ui.setStatus("chess", "Lichess: approve access in your browser. /chess stop cancels.");
-        token = await login(abort.signal);
-        ctx.ui.setStatus("chess", undefined);
-      }
-      const api = lichess(token, abort.signal);
-      const [ongoing, pending] = await Promise.all([api.playing(), api.challenges()]);
-      const accept = async (id: string) => {
-        await api.accept(id);
-        // Accepting starts the game at once: it is the one that was not ongoing before.
-        const started = (await api.playing()).find((now) => !ongoing.some((old) => old.gameId === now.gameId));
-        if (!started) ctx.ui.notify("Challenge accepted. Run /chess to open the game.", "info");
-        return started;
+      const api = async () => {
+        if (!token) {
+          ctx.ui.setStatus("chess", "Lichess: approve access in your browser. /chess stop cancels.");
+          token = await login(abort.signal);
+          ctx.ui.setStatus("chess", undefined);
+        }
+        return lichess(token, abort.signal);
       };
       // A correspondence challenge or seek can wait for days, so do not hold the command open.
       const start = async (opponent: string) => {
         if (opponent) {
-          await api.challenge(opponent);
+          await (await api()).challenge(opponent);
           ctx.ui.notify(`Challenge sent to ${clean(opponent)}. Run /chess after they accept.`, "info");
         } else {
-          await api.seek();
+          await (await api()).seek();
           ctx.ui.notify("Seek posted on Lichess. Run /chess after someone accepts.", "info");
         }
       };
-      let game: (typeof ongoing)[number] | undefined;
-      if (arg === "accept") {
-        const first = pending.in[0];
-        if (!first) throw new Error("No incoming Lichess challenge.");
-        game = await accept(first.id);
-      } else if (arg && arg !== "new") {
-        await start(arg);
-      } else {
+      type Game = Awaited<ReturnType<Lichess["playing"]>>[number];
+      /** What to open next: a game, the daily puzzle, or nothing. */
+      const choose = async (request: string, menu: boolean): Promise<Game | "puzzle" | undefined> => {
+        if (request === "puzzle") return "puzzle";
+        const client = await api();
+        const [ongoing, pending] = await Promise.all([client.playing(), client.challenges()]);
+        const accept = async (id: string) => {
+          await client.accept(id);
+          // Accepting starts the game at once: it is the one that was not ongoing before.
+          const started = (await client.playing()).find((now) => !ongoing.some((old) => old.gameId === now.gameId));
+          if (!started) ctx.ui.notify("Challenge accepted. Run /chess to open the game.", "info");
+          return started;
+        };
+        if (request === "accept") {
+          const first = pending.in[0];
+          if (!first) throw new Error("No incoming Lichess challenge.");
+          return accept(first.id);
+        }
+        if (request && request !== "new") {
+          await start(request);
+          return undefined;
+        }
         const games = ongoing.map(
           (each, index) =>
             `${index + 1}. vs ${clean(each.opponent?.username ?? "unknown")}${each.isMyTurn ? " (your move)" : ""}`,
@@ -296,10 +309,11 @@ export default function chess(pi: ExtensionAPI) {
         const fresh = "New game";
         const daily = "Daily puzzle";
         let choice: string | undefined = fresh;
-        if (arg !== "new") {
+        if (request !== "new") {
           const waiting = pending.out.map((each) => clean(each.destUser?.name ?? "unknown")).join(", ");
+          // A bare /chess opens a single game directly; g on the board always shows the menu.
           choice =
-            games.length === 1 && requests.length === 0
+            !menu && games.length === 1 && requests.length === 0
               ? games[0]
               : await ctx.ui.select(waiting ? `Lichess · waiting for ${waiting}` : "Lichess", [
                   ...games,
@@ -308,35 +322,32 @@ export default function chess(pi: ExtensionAPI) {
                   daily,
                 ]);
         }
-        if (!choice) return;
-        if (games.includes(choice)) game = ongoing[games.indexOf(choice)];
-        else if (requests.includes(choice)) game = await accept(pending.in[requests.indexOf(choice)]?.id ?? "");
-        else if (choice === daily) return await solve(ctx, abort);
-        else {
-          const opponent = await pick(api, ctx);
-          if (opponent !== undefined) await start(opponent);
-        }
-      }
-      // g on the board opens the next ongoing game, in the order Lichess lists them.
-      while (game && !abort.signal.aborted) {
-        const all = await api.playing();
+        if (!choice) return undefined;
+        if (games.includes(choice)) return ongoing[games.indexOf(choice)];
+        if (requests.includes(choice)) return accept(pending.in[requests.indexOf(choice)]?.id ?? "");
+        if (choice === daily) return "puzzle";
+        const opponent = await pick(client, ctx);
+        if (opponent !== undefined) await start(opponent);
+        return undefined;
+      };
+      // g on a board goes back to the menu; Escape or a cancelled menu ends the command.
+      let request = arg;
+      let menu = false;
+      while (!abort.signal.aborted) {
+        const next = await choose(request, menu);
+        if (!next) break;
         const board = new AbortController();
         const follow = () => board.abort();
         abort.signal.addEventListener("abort", follow, { once: true });
-        const current: typeof game = game;
-        const switched = await play(
-          lichess(token, board.signal),
-          current,
-          ctx,
-          board,
-          () => abort.abort(),
-          all.some((each) => each.gameId !== current.gameId),
-        );
+        const back =
+          next === "puzzle"
+            ? await solve(ctx, board, quit)
+            : await play(lichess(token ?? "", board.signal), next, ctx, board, quit);
         abort.signal.removeEventListener("abort", follow);
-        if (!switched) break;
+        if (!back) break;
         over = false;
-        const index = all.findIndex((each) => each.gameId === current.gameId);
-        game = all[(index + 1) % all.length];
+        request = "";
+        menu = true;
       }
     } catch (error) {
       if (!abort.signal.aborted) {
