@@ -33,19 +33,19 @@ test("draws coloured squares in two sizes with cursor, selection and last move",
   assert.ok(plain(flipped[0]).startsWith(" 1  ♜ "));
   assert.match(flipped[8], /h {2}g/);
   const big = render(position(""), { white: true, col: 0, row: 0, selected: "e2", big: true });
-  assert.equal(big.length, 25);
-  assert.match(big[24], /a {6}b/);
-  // Every line of the big board has the same width: 3 for the rank label and 7 per square.
-  for (const line of big.slice(0, 24)) assert.equal(plain(line).length, 59);
-  // a1 is a dark square with a white rook in block art; h1 is a light square.
-  assert.ok(big[21].startsWith("   \x1b[48;2;10;100;72;38;2;255;255;255m  ▅ ▅  "));
-  assert.ok(big[22].startsWith(" 1 \x1b[48;2;10;100;72;38;2;255;255;255m  ███  "));
-  assert.ok(big[22].endsWith("\x1b[48;2;148;156;151;38;2;255;255;255m  ███  \x1b[0m"));
-  // The cursor is on a8, e2 is selected, and e3 is marked as a legal target.
-  assert.ok(big[0].startsWith("   \x1b[48;2;226;191;89;38;2;2;32;33m  ▅ ▅  "));
-  assert.ok(big[19].includes("\x1b[48;2;141;109;15;38;2;255;255;255m  ▆█▆  "));
-  assert.ok(big[16].includes("m   ·   "));
-  assert.ok(!big[15].includes("·") && !big[17].includes("·"));
+  assert.equal(big.length, 18);
+  assert.match(big[17], /a {4}b/);
+  // Every square is 5 columns wide: 3 for the rank label plus 8 squares.
+  for (const line of big.slice(0, 17)) assert.equal(plain(line).length, 43);
+  // a1 is a dark square, and h1 is a light square with a white rook.
+  assert.ok(big[15].startsWith(" 1 \x1b[48;2;10;100;72;"));
+  assert.ok(big[15].endsWith("\x1b[48;2;148;156;151;38;2;255;255;255m  ♜  \x1b[0m"));
+  // The cursor is on a8. The next line holds its lower half above the upper half of a7.
+  assert.ok(big[1].startsWith(" 8 \x1b[48;2;226;191;89;38;2;2;32;33m  ♜  "));
+  assert.ok(big[2].startsWith("   \x1b[38;2;226;191;89;48;2;10;100;72m▀▀▀▀▀"));
+  // e2 is selected, and e3 is marked as a legal target.
+  assert.ok(big[13].includes("\x1b[48;2;141;109;15;38;2;255;255;255m  ♟  "));
+  assert.ok(big[11].includes("m  ·  "));
   const moved = render(position("e2e4 f7f6 d1h5"), { white: true, col: 0, row: 0, last: "d1h5" });
   assert.ok(moved[3].endsWith("\x1b[48;2;66;110;115;38;2;255;255;255m ♛ \x1b[0m"));
 });

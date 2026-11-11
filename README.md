@@ -27,7 +27,7 @@ Every game lives on Lichess. The package saves no game state, makes no model cal
 - challenges a Lichess friend, any Lichess user, or anyone through a public seek
 - opens the Lichess daily puzzle, with no login
 - starts every game as casual correspondence with 3 days per move
-- draws the board in two sizes, the large one with block-art pieces
+- draws the board in two sizes
 - logs in through the Lichess consent page in the browser, with no app registration
 
 ## Install
@@ -74,7 +74,7 @@ A challenge or a seek returns at once, because the opponent can take days to ans
 | `R` twice | Resign |
 | Escape | Close the board. The game continues on Lichess. |
 
-- The small board is 9 rows. The large board is 25 rows, draws each piece as block art, and needs a terminal with at least 34 rows.
+- The small board is 9 rows. The large board is 18 rows, with near-square fields, and needs a terminal with at least 28 rows.
 - The board takes every key while it is open. Press Escape to type to the agent.
 - A finished game shows its result and stays until Escape or the next `/chess`.
 - A pawn always promotes to a queen.
@@ -121,10 +121,6 @@ The tests cover move replay, legal moves, board drawing, the game stream reader,
 - **No cancel for a sent challenge.** Cancel it on lichess.org.
 - **No automated test for the pi wiring.** The file that connects the parts to pi is checked by hand.
 - **24-bit colour.** The board needs a terminal with true colour.
-
-## Credits
-
-The block-art pieces of the large board come from [chess-tui](https://github.com/thomas-mauran/chess-tui) by Thomas Mauran, under the MIT license. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 

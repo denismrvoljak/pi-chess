@@ -24,16 +24,6 @@ export const squareAt = (col: number, row: number, white: boolean) =>
   (white ? `${"abcdefgh"[col]}${8 - row}` : `${"hgfedcba"[col]}${row + 1}`) as Square;
 
 const GLYPH = { k: "♚", q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
-// Block art for the large board: the "Compact" pieces from chess-tui
-// (https://github.com/thomas-mauran/chess-tui, MIT, Copyright (c) 2023 Thomas Mauran).
-const ART = {
-  k: ["▗▂╋▂▖", " ▀█▀ ", " ▀▀▀ "],
-  q: [" ▆▄▆ ", " ▗█▖ ", " ▀▀▀ "],
-  r: [" ▅ ▅ ", " ███ ", "▝▀▀▀▘"],
-  b: [" ▆▖▆ ", " ▐▙▌ ", " ▀▀▀ "],
-  n: [" ▄▟▟▖", " ▂█▛▘", "▝▀▀▀▘"],
-  p: ["  ▂  ", " ▆█▆ ", " ▔▔▔ "],
-};
 const rgb = (hex: string) => [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16)).join(";");
 // Both piece colours keep at least 2.4:1 contrast on every colour except the cursor.
 const LIGHT = rgb("#949C97");
@@ -48,38 +38,39 @@ export function render(
   view: { white: boolean; col: number; row: number; selected?: Square; last?: string; big?: boolean },
 ) {
   const marks = view.selected ? targets(chess, view.selected) : [];
-  // A terminal cell is about twice as tall as wide. Small squares are 3x1 with a glyph.
-  // Big squares are 7x3 with block art, so the piece fills its square.
-  const [pad, height] = view.big ? ["   ", 3] : [" ", 1];
+  const pad = view.big ? "  " : " ";
+  const background = (col: number, row: number) => {
+    const square = squareAt(col, row, view.white);
+    if (col === view.col && row === view.row) return CURSOR;
+    if (square === view.selected) return SELECTED;
+    if (view.last?.includes(square)) return LAST;
+    return (square.charCodeAt(0) + Number(square[1])) % 2 === 1 ? LIGHT : DARK;
+  };
+  // A terminal cell is about twice as tall as wide. Big squares are 5 columns by 2 rows:
+  // one row with the piece, plus half a row above and below drawn with half blocks.
+  const edge = (row: number) => {
+    let line = "   ";
+    for (let col = 0; col < 8; col++) {
+      const above = row > 0 ? `38;2;${background(col, row - 1)}` : undefined;
+      const below = row < 8 ? background(col, row) : undefined;
+      const colors = above && below ? `${above};48;2;${below}` : (above ?? `38;2;${below}`);
+      line += `\x1b[${colors}m${(above ? "▀" : "▄").repeat(5)}\x1b[0m`;
+    }
+    return line;
+  };
   const lines: string[] = [];
   for (let row = 0; row < 8; row++) {
-    for (let part = 0; part < height; part++) {
-      const middle = part === (height - 1) / 2;
-      let line = middle ? ` ${squareAt(0, row, view.white)[1]} ` : "   ";
-      for (let col = 0; col < 8; col++) {
-        const square = squareAt(col, row, view.white);
-        const piece = chess.get(square);
-        const background =
-          col === view.col && row === view.row
-            ? CURSOR
-            : square === view.selected
-              ? SELECTED
-              : view.last?.includes(square)
-                ? LAST
-                : (square.charCodeAt(0) + Number(square[1])) % 2 === 1
-                  ? LIGHT
-                  : DARK;
-        const mark = middle && marks.includes(square) ? "·" : " ";
-        const content = !piece
-          ? `${pad}${mark}${pad}`
-          : view.big
-            ? ` ${ART[piece.type][part]} `
-            : ` ${GLYPH[piece.type]} `;
-        line += `\x1b[48;2;${background};38;2;${PIECE[piece?.color ?? "b"]}m${content}\x1b[0m`;
-      }
-      lines.push(line);
+    if (view.big) lines.push(edge(row));
+    let line = ` ${squareAt(0, row, view.white)[1]} `;
+    for (let col = 0; col < 8; col++) {
+      const square = squareAt(col, row, view.white);
+      const piece = chess.get(square);
+      const glyph = piece ? GLYPH[piece.type] : marks.includes(square) ? "·" : " ";
+      line += `\x1b[48;2;${background(col, row)};38;2;${PIECE[piece?.color ?? "b"]}m${pad}${glyph}${pad}\x1b[0m`;
     }
+    lines.push(line);
   }
+  if (view.big) lines.push(edge(8));
   const files = [...(view.white ? "abcdefgh" : "hgfedcba")];
   lines.push(`   ${files.map((file) => `${pad}${file}${pad}`).join("")}`);
   return lines;

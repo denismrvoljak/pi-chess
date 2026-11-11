@@ -58,8 +58,8 @@ export default function chess(pi: ExtensionAPI) {
     abort.signal.aborted
       ? Promise.resolve()
       : new Promise<void>((resolve) => abort.signal.addEventListener("abort", () => resolve(), { once: true }));
-  // The large board needs 25 rows plus the text rows, the editor and the footer.
-  const big = (rows: number) => !compact && rows >= 34;
+  // The large board needs 18 rows plus the text rows, the editor and the footer.
+  const big = (rows: number) => !compact && rows >= 28;
 
   const solve = async (ctx: ExtensionCommandContext, abort: AbortController) => {
     const puzzle = await dailyPuzzle(abort.signal);
